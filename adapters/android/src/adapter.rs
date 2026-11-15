@@ -114,6 +114,14 @@ impl TreeChangeHandler for AdapterChangeHandler<'_> {
                 self.enqueue_live_region_changed(new_node);
             }
         }
+        if old_node.toggled() != new_node.toggled()
+            || old_node.is_selected() != new_node.is_selected()
+        {
+            let id = self.node_id_map.get_or_create_java_id(new_node);
+            self.events.push(QueuedEvent::StateDescriptionChanged {
+                virtual_view_id: id,
+            });
+        }
         let old_text = old_wrapper.text();
         let new_text = new_wrapper.text();
         if old_text != new_text {
@@ -183,7 +191,7 @@ impl TreeChangeHandler for AdapterChangeHandler<'_> {
                 });
             }
         }
-        // TODO: other events
+        // TODO: events for the other properties
     }
 
     fn focus_moved(&mut self, _old_node: Option<&NodeRef>, new_node: Option<&NodeRef>) {

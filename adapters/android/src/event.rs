@@ -86,6 +86,21 @@ fn send_window_content_changed(env: &mut JNIEnv, host: &JObject, virtual_view_id
     send_completed_event(env, host, event);
 }
 
+fn send_state_description_changed(env: &mut JNIEnv, host: &JObject, virtual_view_id: jint) {
+    if !supports_state_description(env) {
+        return;
+    }
+    let event = new_event(env, host, virtual_view_id, EVENT_WINDOW_CONTENT_CHANGED);
+    env.call_method(
+        &event,
+        "setContentChangeTypes",
+        "(I)V",
+        &[CONTENT_CHANGE_TYPE_STATE_DESCRIPTION.into()],
+    )
+    .unwrap();
+    send_completed_event(env, host, event);
+}
+
 fn send_text_changed(
     env: &mut JNIEnv,
     host: &JObject,
@@ -299,6 +314,9 @@ pub(crate) enum QueuedEvent {
     WindowContentChanged {
         virtual_view_id: jint,
     },
+    StateDescriptionChanged {
+        virtual_view_id: jint,
+    },
     TextChanged {
         virtual_view_id: jint,
         old: String,
@@ -363,6 +381,9 @@ impl QueuedEvents {
                 }
                 QueuedEvent::WindowContentChanged { virtual_view_id } => {
                     send_window_content_changed(env, host, virtual_view_id);
+                }
+                QueuedEvent::StateDescriptionChanged { virtual_view_id } => {
+                    send_state_description_changed(env, host, virtual_view_id);
                 }
                 QueuedEvent::TextChanged {
                     virtual_view_id,

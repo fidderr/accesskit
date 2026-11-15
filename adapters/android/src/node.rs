@@ -66,6 +66,20 @@ impl NodeWrapper<'_> {
             || self.0.supports_action(Action::ScrollUp, &filter)
     }
 
+    /// The text that accessibility services announce when the state of the node changes, using
+    /// the same strings as the framework's own checkboxes and selectable items.
+    fn state_description(&self, env: &mut JNIEnv) -> Option<String> {
+        let name = match (self.0.toggled(), self.0.is_selected()) {
+            (Some(Toggled::True), _) => "checked",
+            (Some(Toggled::False), _) => "not_checked",
+            (Some(Toggled::Mixed), _) => return None,
+            (None, Some(true)) => "selected",
+            (None, Some(false)) => "not_selected",
+            (None, None) => return None,
+        };
+        system_string(env, name)
+    }
+
     fn is_selected(&self) -> bool {
         self.0.is_selected().unwrap_or(false)
     }
@@ -305,6 +319,18 @@ impl NodeWrapper<'_> {
             &[self.is_selected().into()],
         )
         .unwrap();
+        if supports_state_description(env) {
+            if let Some(state) = self.state_description(env) {
+                let state = env.new_string(state).unwrap();
+                env.call_method(
+                    node_info,
+                    "setStateDescription",
+                    "(Ljava/lang/CharSequence;)V",
+                    &[(&state).into()],
+                )
+                .unwrap();
+            }
+        }
         // TBD: When, if ever, should the visible-to-user property be false?
         env.call_method(node_info, "setVisibleToUser", "(Z)V", &[true.into()])
             .unwrap();

@@ -32,6 +32,7 @@ pub(crate) const ACTION_ARGUMENT_PROGRESS_VALUE: &str =
     "android.view.accessibility.action.ARGUMENT_PROGRESS_VALUE";
 
 pub(crate) const CONTENT_CHANGE_TYPE_SUBTREE: jint = 1 << 0;
+pub(crate) const CONTENT_CHANGE_TYPE_STATE_DESCRIPTION: jint = 1 << 6;
 
 pub(crate) const EVENT_VIEW_CLICKED: jint = 1;
 pub(crate) const EVENT_VIEW_SELECTED: jint = 1 << 2;
@@ -66,6 +67,63 @@ pub(crate) const MOVEMENT_GRANULARITY_PARAGRAPH: jint = 1 << 3;
 
 pub(crate) const RANGE_TYPE_INT: jint = 0;
 pub(crate) const RANGE_TYPE_FLOAT: jint = 1;
+
+/// The API level from which a node can have a state description, which is also what
+/// accessibility services announce when a state changes.
+const STATE_DESCRIPTION_SDK_INT: jint = 30;
+
+pub(crate) fn supports_state_description(env: &mut JNIEnv) -> bool {
+    static SDK_INT: OnceLock<jint> = OnceLock::new();
+    *SDK_INT.get_or_init(|| {
+        env.get_static_field("android/os/Build$VERSION", "SDK_INT", "I")
+            .unwrap()
+            .i()
+            .unwrap()
+    }) >= STATE_DESCRIPTION_SDK_INT
+}
+
+/// Looks up one of the strings that the framework uses for the state of its own views, such as
+/// `checked`, in the language of the system.
+pub(crate) fn system_string(env: &mut JNIEnv, name: &str) -> Option<String> {
+    let resources_class = env.find_class("android/content/res/Resources").unwrap();
+    let resources = env
+        .call_static_method(
+            &resources_class,
+            "getSystem",
+            "()Landroid/content/res/Resources;",
+            &[],
+        )
+        .unwrap()
+        .l()
+        .unwrap();
+    let name = env.new_string(name).unwrap();
+    let res_type = env.new_string("string").unwrap();
+    let package = env.new_string("android").unwrap();
+    let id = env
+        .call_method(
+            &resources,
+            "getIdentifier",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)I",
+            &[(&name).into(), (&res_type).into(), (&package).into()],
+        )
+        .unwrap()
+        .i()
+        .unwrap();
+    if id == 0 {
+        return None;
+    }
+    let string = env
+        .call_method(
+            &resources,
+            "getString",
+            "(I)Ljava/lang/String;",
+            &[id.into()],
+        )
+        .unwrap()
+        .l()
+        .unwrap();
+    Some(env.get_string(&string.into()).unwrap().into())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Range {
