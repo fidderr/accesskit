@@ -36,11 +36,13 @@ impl NodeWrapper<'_> {
     }
 
     fn is_focusable(&self) -> bool {
-        self.0.is_focusable(&filter) && self.0.role() != Role::ScrollView
+        self.0.is_focusable(&filter) && !matches!(self.0.role(), Role::ScrollView | Role::Window)
     }
 
     fn is_focused(&self) -> bool {
-        self.0.is_focused()
+        // The window itself is not a place for the focus: when the focused node goes away, the
+        // screen reader should pick the next element, not frame the whole window.
+        self.0.is_focused() && self.0.role() != Role::Window
     }
 
     fn is_password(&self) -> bool {
