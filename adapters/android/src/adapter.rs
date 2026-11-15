@@ -345,6 +345,12 @@ impl Adapter {
             let Some(node) = tree_state.node_by_id(accesskit_id) else {
                 return JObject::null();
             };
+            // A node that the filter leaves out (hidden, or behind a modal) is not part of the
+            // Android tree. Answering null for it makes Android drop an accessibility focus that
+            // is still on it.
+            if filter(&node) != FilterResult::Include {
+                return JObject::null();
+            }
             node
         };
 
@@ -439,6 +445,13 @@ impl Adapter {
             self.node_id_map.get_accesskit_id(virtual_view_id)?
         };
         let (target_node, target_tree) = tree_state.locate_node(target)?;
+        if virtual_view_id != HOST_VIEW_ID
+            && tree_state
+                .node_by_id(target)
+                .is_none_or(|node| filter(&node) != FilterResult::Include)
+        {
+            return None;
+        }
         let mut events = Vec::new();
         let request = match action {
             ACTION_CLICK => ActionRequest {
