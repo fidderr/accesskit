@@ -240,7 +240,7 @@ fn load_delegate_class(env: &mut JNIEnv) -> Result<GlobalRef> {
             "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V",
             &[(&dex_buffer).into(), (&parent_class_loader).into()],
         )?;
-        let class_name = env.new_string("dev.accesskit.android.Delegate")?;
+        let class_name = env.new_string("dev.accesskit.android.DelegateMissing")?;
         let class_obj = env
             .call_method(
                 &dex_class_loader,
@@ -252,7 +252,7 @@ fn load_delegate_class(env: &mut JNIEnv) -> Result<GlobalRef> {
         JClass::from(class_obj)
     };
     #[cfg(not(feature = "embedded-dex"))]
-    let class = env.find_class("dev/accesskit/android/Delegate")?;
+    let class = env.find_class("dev.accesskit.android.DelegateMissing")?;
     env.register_native_methods(
         &class,
         &[
