@@ -288,17 +288,17 @@ fn load_delegate_class(env: &mut JNIEnv) -> Result<GlobalRef> {
     env.new_global_ref(class)
 }
 
-fn delegate_class(env: &mut JNIEnv) -> &'static JClass<'static> {
+fn delegate_class(env: &mut JNIEnv) -> Result<&'static JClass<'static>> {
     static CLASS: OnceLock<GlobalRef> = OnceLock::new();
-    let global = CLASS.get_or_init(|| {
-        load_delegate_class(env).unwrap_or_else(|e| {
-            // A pending Java exception would abort the process at the next JNI call. Clear it
-            // so that the caller can catch the panic and go on without accessibility.
-            let _ = env.exception_clear();
-            panic!("failed to load the delegate class: {e}");
-        })
-    });
-    global.as_obj().into()
+    if let Some(global) = CLASS.get() {
+        return Ok(global.as_obj().into());
+    }
+    let loaded = load_delegate_class(env).inspect_err(|_| {
+        // A pending Java exception would abort the process at the next JNI call. Clear it
+        // so that the caller can go on without accessibility.
+        let _ = env.exception_clear();
+    })?;
+    Ok(CLASS.get_or_init(|| loaded).as_obj().into())
 }
 
 /// High-level AccessKit Android adapter that injects itself into an Android
@@ -333,12 +333,29 @@ impl Debug for InjectingAdapter {
 }
 
 impl InjectingAdapter {
+    /// Like [`Self::try_new`], but panics when the delegate class can't be loaded. A build
+    /// with `panic = "abort"` ends the process then; use `try_new` to go on without
+    /// accessibility instead.
     pub fn new(
         env: &mut JNIEnv,
         host: &JObject,
         activation_handler: impl 'static + ActivationHandler + Send,
         action_handler: impl 'static + ActionHandler + Send,
     ) -> Self {
+        Self::try_new(env, host, activation_handler, action_handler)
+            .unwrap_or_else(|e| panic!("failed to load the delegate class: {e}"))
+    }
+
+    /// Like [`Self::new`], but returns the error when the delegate class can't be loaded
+    /// (the Java exception is cleared), so that the application can run without
+    /// accessibility.
+    pub fn try_new(
+        env: &mut JNIEnv,
+        host: &JObject,
+        activation_handler: impl 'static + ActivationHandler + Send,
+        action_handler: impl 'static + ActionHandler + Send,
+    ) -> Result<Self> {
+        let delegate_class = delegate_class(env)?;
         let inner = Arc::new(Mutex::new(InnerInjectingAdapter {
             adapter: Adapter::default(),
             activation_handler: Box::new(activation_handler),
@@ -349,7 +366,6 @@ impl InjectingAdapter {
             .lock()
             .unwrap()
             .insert(handle, Arc::downgrade(&inner));
-        let delegate_class = delegate_class(env);
         post_to_ui_thread(
             env,
             delegate_class,
@@ -387,13 +403,13 @@ impl InjectingAdapter {
                 .unwrap();
             },
         );
-        Self {
+        Ok(Self {
             vm: env.get_java_vm().unwrap(),
             delegate_class,
             host: env.new_weak_ref(host).unwrap().unwrap(),
             handle,
             inner,
-        }
+        })
     }
 
     /// If and only if the tree has been initialized, call the provided function
