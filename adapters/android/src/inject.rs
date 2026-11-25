@@ -219,77 +219,84 @@ extern "system" fn on_hover_event<'local>(
     JNI_TRUE
 }
 
+fn load_delegate_class(env: &mut JNIEnv) -> Result<GlobalRef> {
+    #[cfg(feature = "embedded-dex")]
+    let class = {
+        let dex_class_loader_class = env.find_class("dalvik/system/InMemoryDexClassLoader")?;
+        let dex_bytes = include_bytes!("../classes.dex");
+        let dex_buffer =
+            unsafe { env.new_direct_byte_buffer(dex_bytes.as_ptr() as *mut u8, dex_bytes.len()) }?;
+        // Android 9 and below can't define the delegate class when the parent is null.
+        let parent_class_loader = env
+            .call_static_method(
+                "java/lang/ClassLoader",
+                "getSystemClassLoader",
+                "()Ljava/lang/ClassLoader;",
+                &[],
+            )?
+            .l()?;
+        let dex_class_loader = env.new_object(
+            &dex_class_loader_class,
+            "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V",
+            &[(&dex_buffer).into(), (&parent_class_loader).into()],
+        )?;
+        let class_name = env.new_string("dev.accesskit.android.Delegate")?;
+        let class_obj = env
+            .call_method(
+                &dex_class_loader,
+                "loadClass",
+                "(Ljava/lang/String;)Ljava/lang/Class;",
+                &[(&class_name).into()],
+            )?
+            .l()?;
+        JClass::from(class_obj)
+    };
+    #[cfg(not(feature = "embedded-dex"))]
+    let class = env.find_class("dev/accesskit/android/Delegate")?;
+    env.register_native_methods(
+        &class,
+        &[
+            NativeMethod {
+                name: "runCallback".into(),
+                sig: "(Landroid/view/View;J)V".into(),
+                fn_ptr: run_callback as *mut c_void,
+            },
+            NativeMethod {
+                name: "createAccessibilityNodeInfo".into(),
+                sig: "(JLandroid/view/View;I)Landroid/view/accessibility/AccessibilityNodeInfo;"
+                    .into(),
+                fn_ptr: create_accessibility_node_info as *mut c_void,
+            },
+            NativeMethod {
+                name: "findFocus".into(),
+                sig: "(JLandroid/view/View;I)Landroid/view/accessibility/AccessibilityNodeInfo;"
+                    .into(),
+                fn_ptr: find_focus as *mut c_void,
+            },
+            NativeMethod {
+                name: "performAction".into(),
+                sig: "(JLandroid/view/View;IILandroid/os/Bundle;)Z".into(),
+                fn_ptr: perform_action as *mut c_void,
+            },
+            NativeMethod {
+                name: "onHoverEvent".into(),
+                sig: "(JLandroid/view/View;IFF)Z".into(),
+                fn_ptr: on_hover_event as *mut c_void,
+            },
+        ],
+    )?;
+    env.new_global_ref(class)
+}
+
 fn delegate_class(env: &mut JNIEnv) -> &'static JClass<'static> {
     static CLASS: OnceLock<GlobalRef> = OnceLock::new();
     let global = CLASS.get_or_init(|| {
-        #[cfg(feature = "embedded-dex")]
-        let class = {
-            let dex_class_loader_class = env
-                .find_class("dalvik/system/InMemoryDexClassLoader")
-                .unwrap();
-            let dex_bytes = include_bytes!("../classes.dex");
-            let dex_buffer = unsafe {
-                env.new_direct_byte_buffer(dex_bytes.as_ptr() as *mut u8, dex_bytes.len())
-            }
-            .unwrap();
-            let dex_class_loader = env
-                .new_object(
-                    &dex_class_loader_class,
-                    "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V",
-                    &[(&dex_buffer).into(), (&JObject::null()).into()],
-                )
-                .unwrap();
-            let class_name = env.new_string("dev.accesskit.android.Delegate").unwrap();
-            let class_obj = env
-                .call_method(
-                    &dex_class_loader,
-                    "loadClass",
-                    "(Ljava/lang/String;)Ljava/lang/Class;",
-                    &[(&class_name).into()],
-                )
-                .unwrap()
-                .l()
-                .unwrap();
-            JClass::from(class_obj)
-        };
-        #[cfg(not(feature = "embedded-dex"))]
-        let class = env.find_class("dev/accesskit/android/Delegate").unwrap();
-        env.register_native_methods(
-            &class,
-            &[
-                NativeMethod {
-                    name: "runCallback".into(),
-                    sig: "(Landroid/view/View;J)V".into(),
-                    fn_ptr: run_callback as *mut c_void,
-                },
-                NativeMethod {
-                    name: "createAccessibilityNodeInfo".into(),
-                    sig:
-                        "(JLandroid/view/View;I)Landroid/view/accessibility/AccessibilityNodeInfo;"
-                            .into(),
-                    fn_ptr: create_accessibility_node_info as *mut c_void,
-                },
-                NativeMethod {
-                    name: "findFocus".into(),
-                    sig:
-                        "(JLandroid/view/View;I)Landroid/view/accessibility/AccessibilityNodeInfo;"
-                            .into(),
-                    fn_ptr: find_focus as *mut c_void,
-                },
-                NativeMethod {
-                    name: "performAction".into(),
-                    sig: "(JLandroid/view/View;IILandroid/os/Bundle;)Z".into(),
-                    fn_ptr: perform_action as *mut c_void,
-                },
-                NativeMethod {
-                    name: "onHoverEvent".into(),
-                    sig: "(JLandroid/view/View;IFF)Z".into(),
-                    fn_ptr: on_hover_event as *mut c_void,
-                },
-            ],
-        )
-        .unwrap();
-        env.new_global_ref(class).unwrap()
+        load_delegate_class(env).unwrap_or_else(|e| {
+            // A pending Java exception would abort the process at the next JNI call. Clear it
+            // so that the caller can catch the panic and go on without accessibility.
+            let _ = env.exception_clear();
+            panic!("failed to load the delegate class: {e}");
+        })
     });
     global.as_obj().into()
 }
