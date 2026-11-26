@@ -278,11 +278,23 @@ fn delegate_class(env: &mut Env) -> &'static JClass<'static> {
                 env.new_direct_byte_buffer(dex_bytes.as_ptr() as *mut u8, dex_bytes.len())
             }
             .unwrap();
+            // Android 9 can't resolve the framework classes that the delegate class
+            // extends when the parent is null.
+            let parent_class_loader = env
+                .call_static_method(
+                    jni_str!("java/lang/ClassLoader"),
+                    jni_str!("getSystemClassLoader"),
+                    jni_sig!("()Ljava/lang/ClassLoader;"),
+                    &[],
+                )
+                .unwrap()
+                .l()
+                .unwrap();
             let dex_class_loader = env
                 .new_object(
                     &dex_class_loader_class,
                     jni_sig!("(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V"),
-                    &[(&dex_buffer).into(), (&JObject::null()).into()],
+                    &[(&dex_buffer).into(), (&parent_class_loader).into()],
                 )
                 .unwrap();
             let class_name = env.new_string("dev.accesskit.android.Delegate").unwrap();
@@ -293,6 +305,9 @@ fn delegate_class(env: &mut Env) -> &'static JClass<'static> {
                     jni_sig!("(Ljava/lang/String;)Ljava/lang/Class;"),
                     &[(&class_name).into()],
                 )
+                // Clear the pending Java exception, so that the caller can catch the panic
+                // and make more JNI calls. The caught exception names the failure.
+                .map_err(|e| env.exception_catch().err().unwrap_or(e))
                 .unwrap()
                 .l()
                 .unwrap();
